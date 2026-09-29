@@ -20,7 +20,7 @@ If the tab reloads or you pause, it picks up at the same page.
 
 1. Open `https://chatgpt.com` in a tab and start a new chat (or open a Project chat).
 2. In the side panel:
-   - **Script**: paste the whole episode, or load the `.txt`/`.md` file.
+   - **Script**: load the episode's `.html` script file (best), or paste text copied from it. "COPY THIS WHOLE PART" text works too.
    - **Character sheets**: drop in your sheet images once. They are stored locally in the extension.
    - **Plan**: check every page before you start. Each character on a page gets a chip:
      - 📎 **green**: the sheet will be attached on this page.
@@ -33,7 +33,17 @@ Open "message that will be sent" under any page to see exactly what will be type
 
 ## Script format
 
-Pages are split on `=== … ===` header lines. Anything before the first header is ignored. The `Attach:` line on each page decides which sheets that page needs:
+**One card = one page = one message = one image.** The extension accepts three shapes:
+
+1. **The episode `.html` file** (like `S21_EP07_script.html`). Each `IMG01 — …` card becomes a page, built the same way the file's own COPY PAGE button builds it, without the VO line. The notes at the top (HP ledger, series rules, "never in this chapter", Sage, …) become the **episode brief**. Each `PART …` heading and its one-line beat become scene context.
+2. **Text copied off that page** (for example "COPY THIS WHOLE PART"). Pages are split on the `IMG10 — Title` lines. The page's button labels (`COPY PAGE`, `+VO`, `COPY THIS WHOLE PART`) are dropped. Layout tags (`L3 three stacked`, `LOAD-BEARING`) stay with the page they belong to. `PART …` lines start a new part and never leak into the previous page.
+3. **`=== … ===` headers**, one per page, as below.
+
+Every message starts with *"Generate exactly ONE image: page NN only…"*. If a page still looks like several pages stuck together (more than one `Attach:` line), the plan shows a ⚠ and Start asks before sending it.
+
+The **episode brief** is sent once at the start of each chat, before the first page, as a separate message that tells ChatGPT not to draw anything. You can edit the brief in the Script section.
+
+The `Attach:` line on each page decides which sheets that page needs:
 
 ```
 === SPECIMEN 21 — EPISODE 7 … — IMG01 — The Door Is Open (page 01 of 50) ===
@@ -66,8 +76,11 @@ To change the behaviour for one page, use the per-page dropdown: **attach all**,
 | Attach mode | Smart | `Always` re-uploads every page. `Never` relies on the text only. |
 | Re-attach after N images | 5 | Lower it if characters start drifting. |
 | Delay min/max | 5 / 10 s | Random wait between pages. |
-| Image timeout | 420 s | After this long with no image, the page counts as failed. |
-| Nudges if no image | 1 | If ChatGPT replies with text or a question instead of an image, it sends "please generate it now". |
+| Image timeout | 600 s | After this long with no image, the page counts as failed. |
+| Patience for text-only reply | 60 s | ChatGPT often goes quiet or blank while it reads the sheets. A reply with no image only counts as "no image" after sitting unchanged this long. Empty or shimmering replies never count. |
+| Re-asks if no image | 1 | If ChatGPT answers with text or a question, it sends "please generate the image for page NN now". |
+| Clicks on "Retry" | 3 | When ChatGPT shows "Something went wrong", the extension clicks ChatGPT's own Retry button instead of giving up. |
+| ONE image guard / brief / scene beat / strip VO | on | See "Script format". Each can be turned off. |
 | When a page fails | Pause | Or log it and skip to the next page. |
 | On usage limit | Pause | Set a number of minutes to wait and retry automatically, for overnight runs. |
 | New chat every N pages | 0 (off) | Long chats get slow. A fresh chat resets memory, so all sheets are re-attached. |

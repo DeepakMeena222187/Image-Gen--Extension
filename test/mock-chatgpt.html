@@ -7,13 +7,18 @@
   <button type="button" data-testid="send-button" disabled>Send</button>
 </form>
 <script>
-  // Tiny fake of the ChatGPT composer for end-to-end tests.
+  // Tiny fake of the ChatGPT composer for end-to-end tests. Prompt keywords pick a behaviour:
+  //   SLOWREAD  → reply sits completely empty for 20s (ChatGPT "reading the sheets"), then the image
+  //   ERRORONCE → "Something went wrong" + Retry button; clicking Retry produces the image
+  //   NOIMAGE   → text-only reply the first time; the follow-up gets an image
+  //   EPISODE BRIEF → text reply "Ready", no image
   window.__sent = [];
   let pending = [];
   let turn = 0;
   const ed = document.getElementById('prompt-textarea');
   const send = document.querySelector('[data-testid="send-button"]');
   const form = document.getElementById('composer');
+  const thread = document.getElementById('thread');
   const refresh = () => { send.disabled = !ed.innerText.trim() || form.querySelector('[role=progressbar]'); };
   ed.addEventListener('input', refresh);
   document.getElementById('upload').addEventListener('change', e => {
@@ -24,26 +29,39 @@
   function addTurn(role, html) {
     const a = document.createElement('article'); a.dataset.testid = 'conversation-turn-' + (++turn);
     a.innerHTML = `<div data-message-author-role="${role}">${html}</div>`;
-    document.getElementById('thread').appendChild(a); return a;
+    thread.appendChild(a); return a;
   }
   function image() {
     const c = document.createElement('canvas'); c.width = 600; c.height = 1000;
     const g = c.getContext('2d'); g.fillStyle = '#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0'); g.fillRect(0,0,600,1000);
     return c.toDataURL('image/png');
   }
+  const showImage = reply => { reply.firstChild.innerHTML = `<p>Image created</p><img width="300" height="500" src="${image()}">`; };
+  const withStop = (ms, then) => {
+    const stop = document.createElement('button'); stop.type='button'; stop.dataset.testid = 'stop-button'; stop.textContent='Stop'; form.appendChild(stop);
+    setTimeout(() => { stop.remove(); then(); }, ms);
+  };
   send.addEventListener('click', () => {
     const text = ed.innerText;
     window.__sent.push({ text, files: pending.slice() });
     pending = []; document.getElementById('attachments').textContent = '';
     ed.innerHTML = ''; refresh();
     addTurn('user', text.replace(/</g,'&lt;'));
-    const stop = document.createElement('button'); stop.type='button'; stop.dataset.testid = 'stop-button'; stop.textContent='Stop'; form.appendChild(stop);
-    const reply = addTurn('assistant', 'Creating image');
-    const noImage = /NOIMAGE/.test(text) && !window.__nudged;
-    setTimeout(() => {
-      stop.remove();
-      if (noImage) { window.__nudged = true; reply.firstChild.textContent = 'Would you like me to adjust anything first?'; return; }
-      reply.firstChild.innerHTML = `<p>Image created</p><img width="300" height="500" src="${image()}">`;
-    }, 2500);
+    const reply = addTurn('assistant', '');
+    if (/^EPISODE BRIEF/.test(text)) return withStop(1500, () => { reply.firstChild.textContent = 'Ready'; });
+    if (/SLOWREAD/.test(text)) return withStop(1000, () => setTimeout(() => showImage(reply), 20000));
+    if (/ERRORONCE/.test(text) && !window.__errored) {
+      window.__errored = true;
+      return withStop(1500, () => {
+        reply.firstChild.innerHTML = '<p>Something went wrong while generating the response.</p><button type="button">Retry</button>';
+        reply.querySelector('button').onclick = () => { window.__retried = true; reply.firstChild.textContent = 'Creating image'; withStop(2000, () => showImage(reply)); };
+      });
+    }
+    if (/NOIMAGE/.test(text) && !window.__nudged) {
+      window.__nudged = true;
+      return withStop(1500, () => { reply.firstChild.textContent = 'Would you like me to adjust anything first before I draw it?'; });
+    }
+    reply.firstChild.textContent = 'Creating image';
+    withStop(2500, () => showImage(reply));
   });
 </script></body></html>

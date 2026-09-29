@@ -34,9 +34,15 @@
 
   <details class="card" open>
     <summary>1 · Script <span id="scriptCount" class="muted"></span></summary>
-    <p class="muted">Paste the whole episode, or load a .txt/.md file. Pages are split on <code>=== … ===</code> headers; the <code>Attach:</code> line says which sheets each page needs.</p>
-    <textarea id="script" rows="8" spellcheck="false" placeholder="=== SPECIMEN 21 — EPISODE 7 … — IMG01 — … ==="></textarea>
-    <div class="row"><input type="file" id="scriptFile" accept=".txt,.md,text/plain,text/markdown" /></div>
+    <p class="muted">Load the episode <b>.html</b> script file, or paste text copied from it (whole parts are fine). Each <code>IMG01 — …</code> card becomes its own page and message. The <code>Attach:</code> line says which sheets that page needs.</p>
+    <div class="row"><input type="file" id="scriptFile" accept=".html,.htm,.txt,.md,text/html,text/plain,text/markdown" /></div>
+    <textarea id="script" rows="8" spellcheck="false" placeholder="Paste the episode here (or load the .html file above)"></textarea>
+    <div id="scriptWarn" class="reason" hidden></div>
+    <details id="briefBox">
+      <summary class="muted">Episode brief <span id="briefState"></span></summary>
+      <p class="muted">Sent once at the start of each chat, before page 1, so ChatGPT knows the episode's rules (HP ledger, series rules, what never appears). It is asked <i>not</i> to draw anything for this message. Loaded automatically from the HTML notes. Edit it freely.</p>
+      <textarea id="brief" rows="7" spellcheck="false" placeholder="Optional: rules and context that apply to every page"></textarea>
+    </details>
   </details>
 
   <details class="card" open>
@@ -67,8 +73,10 @@
       <label>Re-attach a sheet after N images <input name="refreshEvery" type="number" min="1" max="50" /></label>
       <label>Delay min (s) <input name="delayMin" type="number" min="0" /></label>
       <label>Delay max (s) <input name="delayMax" type="number" min="0" /></label>
-      <label>Image timeout (s) <input name="genTimeout" type="number" min="30" /></label>
-      <label>Nudges if no image <input name="retries" type="number" min="0" max="5" /></label>
+      <label>Image timeout (s) <input name="genTimeout" type="number" min="60" /></label>
+      <label>Patience for text-only reply (s) <input name="quietSec" type="number" min="15" /></label>
+      <label>Re-asks if no image <input name="retries" type="number" min="0" max="5" /></label>
+      <label>Clicks on ChatGPT's "Retry" after an error <input name="errorRetries" type="number" min="0" max="10" /></label>
       <label>When a page fails
         <select name="onFail">
           <option value="pause">Pause</option>
@@ -78,6 +86,10 @@
       <label>On usage limit, wait (min, 0 = pause) <input name="rateLimitWaitMin" type="number" min="0" /></label>
       <label>New chat every N pages (0 = never) <input name="newChatEvery" type="number" min="0" /></label>
       <label class="wide">New chat URL (optional, e.g. a ChatGPT Project) <input name="newChatUrl" type="url" placeholder="https://chatgpt.com/g/…/project" /></label>
+      <label class="check"><input name="oneImageGuard" type="checkbox" /> Tell ChatGPT: exactly ONE image, this page only</label>
+      <label class="check"><input name="sendBrief" type="checkbox" /> Send the episode brief at the start of each chat</label>
+      <label class="check"><input name="sceneContext" type="checkbox" /> Add the part's story beat on its first page</label>
+      <label class="check"><input name="stripVO" type="checkbox" /> Leave VO (voice-over) lines out of the message</label>
       <label class="check"><input name="annotateReuse" type="checkbox" /> Tell ChatGPT which sheets it already has</label>
       <label class="check"><input name="autoDownload" type="checkbox" /> Auto-download each image</label>
       <label class="wide">Download subfolder (inside Downloads) <input name="downloadFolder" type="text" /></label>

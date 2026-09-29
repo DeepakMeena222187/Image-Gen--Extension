@@ -19,8 +19,9 @@
     turn: 'article[data-testid^="conversation-turn"], [data-testid^="conversation-turn-"]',
     progress: '[role="progressbar"], .animate-spin',
   };
-  const BUSY_RE = /creating image|generating|getting started|adding details|almost done|still working|thinking/i;
-  const LIMIT_RE = /(hit|reached) (the|your) .{0,40}limit|rate limit|too many (requests|images)|try again (later|in|after)|limit resets/i;
+  const BUSY_RE = /creating image|generating|getting started|adding details|almost done|still working|thinking|analy[sz]ing|reading (the )?(image|file|document)s?|uploading|processing|one moment|just a (sec|moment)/i;
+  const LIMIT_RE = /(hit|reached) (the|your) .{0,40}limit|rate limit|too many (requests|images)|limit resets|try again (later|in \d|after \d)/i;
+  const ERROR_RE = /something went wrong|an error occurred|error (in|generating|while)|network error|there was (a problem|an error)|unable to (load|generate)|failed to (load|generate)|conversation not found/i;
 
   let myTabId = null;
   let looping = false;
@@ -188,38 +189,93 @@
     );
   }
 
-  // Waits for the reply to the last user message. Returns
-  // { kind: 'image', imgs } | { kind: 'limit', text } | { kind: 'noimage', text } | { kind: 'timeout' }
-  async function waitForResult(timeoutSec) {
-    const end = now() + timeoutSec * 1000;
+  // Anything that says "still working" inside the reply: half-loaded or blurred
+  // preview images, shimmer/pulse placeholders, aria-busy, or a short status line.
+  function replyBusy(box, text) {
+    if (!box) return false;
+    if (box.querySelector('[aria-busy="true"], .animate-pulse, [class*="shimmer"], [class*="skeleton"]')) return true;
+    for (const img of box.querySelectorAll('img')) {
+      if (!visible(img)) continue;
+      if (!img.complete) return true;
+      if (img.naturalWidth >= 256 && /blur/.test(getComputedStyle(img).filter || '')) return true;
+    }
+    // "Something went wrong while generating…" is an error, not progress.
+    return text.length < 300 && BUSY_RE.test(text) && !ERROR_RE.test(text) && !LIMIT_RE.test(text);
+  }
+
+  function findRetryButton() {
+    const btns = [...document.querySelectorAll('main button, [role="main"] button')].filter(visible);
+    for (let k = btns.length - 1; k >= 0; k--) {
+      const label = (btns[k].innerText || btns[k].getAttribute('aria-label') || '').trim();
+      if (/^(retry|try again|regenerate)$/i.test(label)) return btns[k];
+    }
+    return null;
+  }
+
+  // Waits for the reply to the last message sent. Returns
+  // { kind: 'image', imgs } | { kind: 'text', text } | { kind: 'limit', text } |
+  // { kind: 'noimage', text } | { kind: 'error', text } | { kind: 'timeout' }
+  //
+  // ChatGPT often goes quiet for a long time after sheets are attached (it is
+  // reading them), shows empty or shimmering placeholders, or briefly blanks the
+  // reply. None of that counts as "done": a reply without an image must sit
+  // unchanged, with nothing busy, for settings.quietSec before we call it.
+  async function waitForResult(settings, expectImage = true) {
+    const end = now() + (Number(settings.genTimeout) || 600) * 1000;
+    const quietMs = expectImage ? Math.max(15, Number(settings.quietSec) || 60) * 1000 : 6000;
+    const maxErrorClicks = Number(settings.errorRetries ?? 3);
+    const started = now();
+    let errorClicks = 0;
     let lastSig = '';
     let stableSince = now();
     while (now() < end) {
       checkHalt();
       const stop = q(SEL.stop);
-      const busy = stop && visible(stop);
+      const stopping = !!stop && visible(stop);
       let box = lastAssistant();
       if (box && box === baselineBox) box = null;
       const text = box ? (box.innerText || '').trim() : '';
       const imgs = box ? bigImages(box) : [];
+      const busy = stopping || replyBusy(box, text);
       const sig = `${busy}|${text.length}|${imgs.map(i => i.currentSrc || i.src).join(',')}`;
       if (sig !== lastSig) {
         lastSig = sig;
         stableSince = now();
       }
       const stableFor = now() - stableSince;
-      const pageLimit = !box && LIMIT_RE.test(document.body.innerText.slice(-3000));
+      // Page-level text is only trusted once the send is well behind us, so an old
+      // error or limit notice from a previous page can't end this wait.
+      const tail = box || now() - started > 20000 ? (q(['main', '[role="main"]', 'body'])?.innerText || '').slice(-1500) : '';
 
-      if (pageLimit) return { kind: 'limit', text: 'Usage limit message on page' };
-      if (!busy && box) {
-        if (imgs.length && stableFor > 4000 && !BUSY_RE.test(text.slice(0, 200))) return { kind: 'image', imgs };
-        if (!imgs.length && stableFor > 10000 && !BUSY_RE.test(text.slice(0, 200))) {
-          return LIMIT_RE.test(text) ? { kind: 'limit', text } : { kind: 'noimage', text };
+      if (!busy && stableFor > 3000 && !imgs.length) {
+        if (LIMIT_RE.test(box ? text : tail)) return { kind: 'limit', text: box ? text : 'Usage limit message on page' };
+        if (ERROR_RE.test(box ? text : tail)) {
+          const retry = findRetryButton();
+          if (retry && errorClicks < maxErrorClicks) {
+            errorClicks++;
+            await log(`ChatGPT showed an error, clicking its Retry button (${errorClicks}/${maxErrorClicks})`, 'warn');
+            baselineBox = null;
+            retry.click();
+            lastSig = '';
+            await sleep(5000);
+            continue;
+          }
+          return { kind: 'error', text: box ? text : tail.slice(-200) };
         }
+      }
+      if (!busy && box) {
+        if (imgs.length && stableFor > 5000) return { kind: 'image', imgs };
+        if (!expectImage && text && stableFor > quietMs) return { kind: 'text', text };
+        if (expectImage && !imgs.length && text.length >= 20 && stableFor > quietMs) return { kind: 'noimage', text };
       }
       await new Promise(r => setTimeout(r, 1000));
     }
     return { kind: 'timeout' };
+  }
+
+  async function sendText(text) {
+    await typeText(text);
+    await clickSend();
   }
 
   async function imgToDataUrl(src) {
@@ -276,7 +332,7 @@
 
     // Re-derive the decision unless we already sent this page (resume after reload).
     let decision = progress.pending?.index === i ? progress.pending.decision : null;
-    if (!decision) decision = MA.planPage(page, progress.ctx, sheets, settings, override);
+    if (!decision) decision = MA.planPage(page, progress.ctx, sheets, settings, override, { hasBrief: !!project.brief?.trim() });
 
     if (decision.skip) {
       results[i] = { status: 'skipped', at: now() };
@@ -294,6 +350,18 @@
         await startNewChat(settings);
       }
       if (!(await waitFor(() => q(SEL.editor), 30000))) throw new Error('ChatGPT composer not found. Is the chat open?');
+
+      if (decision.sendBrief) {
+        await log('Sending the episode brief first (rules and story context, no image)');
+        await sendText(MA.briefMessage(project.brief));
+        const r = await waitForResult({ ...settings, genTimeout: 300 }, false);
+        if (r.kind === 'limit') throw new Error('ChatGPT usage limit reached. Paused. Resume when your limit resets.');
+        if (r.kind === 'error' || r.kind === 'timeout') throw new Error(`The episode brief did not get a reply (${r.kind}).`);
+        progress.ctx = { ...MA.freshCtx(), ...progress.ctx, briefSent: true };
+        decision = { ...decision, sendBrief: false };
+        await patchProgress({ ctx: progress.ctx, pending: { index: i, decision } });
+        await sleep(3000);
+      }
 
       const byId = Object.fromEntries(sheets.map(s => [s.id, s]));
       const files = [];
@@ -316,35 +384,38 @@
     let result;
     let nudges = 0;
     for (;;) {
-      result = await waitForResult(Number(settings.genTimeout) || 420);
+      result = await waitForResult(settings, true);
       if (result.kind === 'limit') {
         const wait = Number(settings.rateLimitWaitMin) || 0;
         if (wait > 0) {
           await log(`Usage limit hit. Waiting ${wait} min, then asking again.`, 'warn');
           await sleep(wait * 60000);
-          await typeText('Please continue and generate the image from my previous message now, exactly as specified.');
-          await clickSend();
+          await sendText('Please continue and generate the image from my previous message now, exactly as specified. One image only.');
           continue;
         }
         throw Object.assign(new Error('ChatGPT usage limit reached. Paused. Resume when your limit resets.'), { soft: true });
       }
-      if (result.kind === 'noimage' && nudges < (Number(settings.retries) || 0)) {
+      if ((result.kind === 'noimage' || result.kind === 'error') && nudges < (Number(settings.retries) || 0)) {
         nudges++;
-        await log(`Page ${page.num}: no image in reply, nudging (${nudges})`, 'warn');
-        await typeText('Please generate the image now exactly as specified in my previous message. Do not ask questions.');
-        await clickSend();
+        await log(`Page ${page.num}: ${result.kind === 'error' ? 'ChatGPT errored' : 'reply had no image'}, asking again (${nudges})`, 'warn');
+        await sendText(`Please generate the image for page ${String(page.num).padStart(2, '0')} now, exactly as specified in my previous message. One image only. Do not ask questions.`);
         continue;
       }
       break;
     }
 
     if (result.kind !== 'image') {
-      const why = result.kind === 'timeout' ? 'timed out waiting for the image' : `no image returned: "${(result.text || '').slice(0, 140)}"`;
+      const why =
+        result.kind === 'timeout'
+          ? `no image after ${settings.genTimeout}s`
+          : result.kind === 'error'
+            ? `ChatGPT error: "${(result.text || '').slice(0, 140)}"`
+            : `reply had no image: "${(result.text || '').slice(0, 140)}"`;
       if (settings.onFail === 'skip') {
         results[i] = { status: 'failed', error: why, at: now() };
         await log(`Page ${page.num}: ${why}. Skipping.`, 'error');
         // The sheets were still sent, so count them as in chat memory.
-        await patchProgress({ index: i + 1, results, ctx: MA.commit(progress.ctx, decision), pending: null, phase: 'idle' });
+        await patchProgress({ index: i + 1, results, ctx: MA.commit(progress.ctx, decision, page), pending: null, phase: 'idle' });
         return;
       }
       throw new Error(`Page ${page.num}: ${why}`);
@@ -359,7 +430,7 @@
       }
     }
     results[i] = { status: 'done', file, attached: decision.attach.map(a => a.name), at: now() };
-    await patchProgress({ index: i + 1, results, ctx: MA.commit(progress.ctx, decision), pending: null, phase: 'idle' });
+    await patchProgress({ index: i + 1, results, ctx: MA.commit(progress.ctx, decision, page), pending: null, phase: 'idle' });
     await log(`Page ${page.num}: done${file ? ` → ${file}` : ''}`, 'ok');
 
     if (i + 1 < project.pages.length) {

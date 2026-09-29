@@ -96,6 +96,12 @@ function renderStartAt() {
 function renderPlan() {
   const pages = S.project.pages;
   $('scriptCount').textContent = pages.length ? `(${pages.length} pages)` : '';
+  const warned = pages.filter(p => p.warnings?.length);
+  $('scriptWarn').hidden = !warned.length;
+  $('scriptWarn').textContent = warned.length
+    ? `⚠ ${warned.length} page(s) look wrong. Check the ⚠ lines in the plan: ${warned.slice(0, 3).map(p => `page ${p.num}: ${p.warnings[0]}`).join(' ')}`
+    : '';
+  $('briefState').textContent = S.project.brief?.trim() ? `(${S.project.brief.trim().length} chars)` : '(empty)';
   if (!pages.length) {
     $('plan').innerHTML = '<p class="muted">Paste a script to see the plan.</p>';
     return;
@@ -103,7 +109,8 @@ function renderPlan() {
   const active = S.control.status === 'running' || S.control.status === 'paused';
   const from = active ? S.progress.index : +($('startAt').value || 0);
   const ctx = active ? S.progress.ctx : MA.freshCtx();
-  const plan = MA.planAll(pages, S.sheets, S.settings, S.project.overrides, from, ctx);
+  const opts = { hasBrief: !!S.project.brief?.trim() };
+  const plan = MA.planAll(pages, S.sheets, S.settings, S.project.overrides, from, ctx, opts);
   const results = S.progress.results || {};
 
   $('plan').innerHTML = pages
@@ -114,15 +121,20 @@ function renderPlan() {
       let chips = '';
       if (d) {
         if (d.newChatBefore) chips += '<span class="chip newchat">new chat</span>';
+        if (d.sendBrief) chips += '<span class="chip newchat">brief first</span>';
         chips += d.attach.map(a => `<span class="chip attach">📎 ${esc(a.charName)}${a.fuzzy ? ` ⚠→${esc(a.name)}` : ''}</span>`).join('');
         chips += d.reuse.map(a => `<span class="chip">${esc(a.charName)}${a.fuzzy ? ` ⚠→${esc(a.name)}` : ''}</span>`).join('');
         chips += d.missing.map(m => `<span class="chip missing">${esc(m.name)}: no sheet</span>`).join('');
+        chips += d.described.map(m => `<span class="chip" title="No sheet uploaded; the Attach line describes it in words">📝 ${esc(m.name)}</span>`).join('');
         if (d.skip) chips = '<span class="chip">skipped</span>';
       } else {
         chips = p.characters.map(c => `<span class="chip">${esc(c.name)}</span>`).join('');
       }
       const status = r ? `<span class="status ${r.status}" title="${esc(r.error || r.file || '')}">${r.status}</span>` : '';
-      const msg = d ? MA.buildMessage(p, d, S.settings) : p.body;
+      let msg = d ? MA.buildMessage(p, d, S.settings) : p.body;
+      if (d?.sendBrief) msg = `[sent first, as its own message]\n${MA.briefMessage(S.project.brief)}\n\n[then this page]\n${msg}`;
+      const tags = (p.tags || []).map(t => `<span class="chip">${esc(t)}</span>`).join('');
+      const warn = (p.warnings || []).map(w => `<div class="reason">⚠ ${esc(w)}</div>`).join('');
       return `<div class="page ${active && i === S.progress.index ? 'current' : ''}">
         <div class="head">
           <span class="num">${p.num}</span>
@@ -134,7 +146,8 @@ function renderPlan() {
               .join('')}
           </select>
         </div>
-        <div class="chips">${chips || '<span class="muted">no Attach: line</span>'}</div>
+        <div class="chips">${chips || '<span class="muted">no Attach: line</span>'}${tags}</div>
+        ${warn}
         <details><summary class="muted">message that will be sent</summary><pre>${esc(msg)}</pre></details>
       </div>`;
     })
@@ -190,10 +203,31 @@ function renderAll() {
 }
 
 // ---------- actions ----------
-async function saveScript(text) {
+const looksLikeHtml = t => /^\s*(<!doctype html|<html[\s>])/i.test(t) || /<div class="card/.test(t);
+
+// Episode HTML → plain page text + brief. Updates both text boxes.
+function importHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const { text, brief, pages } = MA.htmlToProject(doc);
+  if (!pages) {
+    alert('No IMG cards found in that HTML file.');
+    return null;
+  }
+  $('script').value = text;
+  $('brief').value = brief;
+  if (brief) $('briefBox').open = true;
+  return { text, brief };
+}
+
+async function saveScript(text, brief = S.project.brief || '') {
+  if (looksLikeHtml(text)) {
+    const got = importHtml(text);
+    if (!got) return;
+    ({ text, brief } = got);
+  }
   const pages = MA.parseScript(text);
   const same = pages.length === S.project.pages.length;
-  S.project = { scriptText: text, pages, overrides: same ? S.project.overrides : {} };
+  S.project = { scriptText: text, brief, pages, overrides: same ? S.project.overrides : {} };
   await store.set({ project: S.project });
 }
 
@@ -228,6 +262,8 @@ async function command(kind) {
     const missing = new Set();
     MA.planAll(S.project.pages, S.sheets, S.settings, S.project.overrides, from).forEach(d => d?.missing.forEach(m => missing.add(m.name)));
     if (missing.size && !confirm(`No sheet uploaded for: ${[...missing].join(', ')}.\nThose pages will be sent with only the text description. Continue?`)) return;
+    const merged = pending.filter(p => p.warnings?.some(w => /merged/.test(w)));
+    if (merged.length && !confirm(`${merged.length} page(s) look like several pages stuck together (page ${merged.map(p => p.num).join(', ')}). ChatGPT would draw several images for them. Start anyway?`)) return;
     if (!pending.length) return;
     await store.set({ progress: freshProgress(from), log: [] });
     await store.set({ control: { status: 'running', tabId: targetTab.id, startedAt: Date.now() } });
@@ -257,9 +293,17 @@ function wire() {
     const f = e.target.files[0];
     if (!f) return;
     const text = await f.text();
-    $('script').value = text;
+    if (!looksLikeHtml(text)) $('script').value = text;
     await saveScript(text);
     e.target.value = '';
+  });
+  let tb;
+  $('brief').addEventListener('input', e => {
+    clearTimeout(tb);
+    tb = setTimeout(async () => {
+      S.project = { ...S.project, brief: e.target.value };
+      await store.set({ project: S.project });
+    }, 400);
   });
 
   $('sheetFiles').addEventListener('change', async e => {
@@ -348,6 +392,7 @@ function wire() {
 (async () => {
   await load();
   $('script').value = S.project.scriptText || '';
+  $('brief').value = S.project.brief || '';
   renderSettings();
   renderAll();
   wire();

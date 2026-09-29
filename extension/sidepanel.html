@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Manhwa Autopilot</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="bar">
+    <div>
+      <strong>Manhwa Autopilot</strong>
+      <div id="tabStatus" class="muted">Looking for a ChatGPT tab…</div>
+    </div>
+    <span id="runBadge" class="badge">idle</span>
+  </header>
+
+  <section class="card" id="runCard">
+    <div class="progress"><div id="progressFill"></div></div>
+    <div id="progressText" class="muted">No script loaded</div>
+    <div id="reason" class="reason" hidden></div>
+    <div class="row">
+      <label class="inline">Start at page
+        <select id="startAt"></select>
+      </label>
+    </div>
+    <div class="row buttons">
+      <button id="btnStart" class="primary">Start</button>
+      <button id="btnResume">Resume</button>
+      <button id="btnPause">Pause</button>
+      <button id="btnSkip" title="Skip the current page (while paused)">Skip page</button>
+      <button id="btnReset" class="danger">Reset</button>
+    </div>
+  </section>
+
+  <details class="card" open>
+    <summary>1 · Script <span id="scriptCount" class="muted"></span></summary>
+    <p class="muted">Paste the whole episode, or load a .txt/.md file. Pages are split on <code>=== … ===</code> headers; the <code>Attach:</code> line says which sheets each page needs.</p>
+    <textarea id="script" rows="8" spellcheck="false" placeholder="=== SPECIMEN 21 — EPISODE 7 … — IMG01 — … ==="></textarea>
+    <div class="row"><input type="file" id="scriptFile" accept=".txt,.md,text/plain,text/markdown" /></div>
+  </details>
+
+  <details class="card" open>
+    <summary>2 · Character sheets <span id="sheetCount" class="muted"></span></summary>
+    <p class="muted">Upload the images once. The name must match how the <code>Attach:</code> line refers to the character (e.g. file <code>Frillrunner LV6.png</code> matches "FRILLRUNNER LV 6 sheet"). Add aliases with commas for other spellings.</p>
+    <label class="drop" id="drop">
+      <input type="file" id="sheetFiles" accept="image/*" multiple />
+      Drop sheet images here or click to choose
+    </label>
+    <div id="sheets"></div>
+  </details>
+
+  <details class="card" open>
+    <summary>3 · Plan <span class="muted">(green = attach now, grey = ChatGPT already has it, red = no sheet uploaded, ⚠ = guessed match)</span></summary>
+    <div id="plan"></div>
+  </details>
+
+  <details class="card">
+    <summary>Settings</summary>
+    <form id="settings" class="grid">
+      <label>Attach mode
+        <select name="attachMode">
+          <option value="smart">Smart (re-attach when memory may fade)</option>
+          <option value="always">Always attach every page</option>
+          <option value="never">Never attach</option>
+        </select>
+      </label>
+      <label>Re-attach a sheet after N images <input name="refreshEvery" type="number" min="1" max="50" /></label>
+      <label>Delay min (s) <input name="delayMin" type="number" min="0" /></label>
+      <label>Delay max (s) <input name="delayMax" type="number" min="0" /></label>
+      <label>Image timeout (s) <input name="genTimeout" type="number" min="30" /></label>
+      <label>Nudges if no image <input name="retries" type="number" min="0" max="5" /></label>
+      <label>When a page fails
+        <select name="onFail">
+          <option value="pause">Pause</option>
+          <option value="skip">Log it and skip</option>
+        </select>
+      </label>
+      <label>On usage limit, wait (min, 0 = pause) <input name="rateLimitWaitMin" type="number" min="0" /></label>
+      <label>New chat every N pages (0 = never) <input name="newChatEvery" type="number" min="0" /></label>
+      <label class="wide">New chat URL (optional, e.g. a ChatGPT Project) <input name="newChatUrl" type="url" placeholder="https://chatgpt.com/g/…/project" /></label>
+      <label class="check"><input name="annotateReuse" type="checkbox" /> Tell ChatGPT which sheets it already has</label>
+      <label class="check"><input name="autoDownload" type="checkbox" /> Auto-download each image</label>
+      <label class="wide">Download subfolder (inside Downloads) <input name="downloadFolder" type="text" /></label>
+      <label>Max files per message <input name="maxFilesPerMessage" type="number" min="1" max="10" /></label>
+    </form>
+  </details>
+
+  <details class="card" open>
+    <summary>Log <button id="btnClearLog" class="link">clear</button></summary>
+    <div id="log"></div>
+  </details>
+
+  <script src="lib/core.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

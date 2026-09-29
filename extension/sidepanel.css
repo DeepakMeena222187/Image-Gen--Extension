@@ -1,0 +1,58 @@
+:root {
+  --bg: #0f1115; --card: #171a21; --line: #262b36; --text: #e6e8ee; --muted: #8b93a7;
+  --accent: #6d8bff; --ok: #3ecf8e; --warn: #f5b64a; --err: #ff6b6b; --reuse: #5b6475;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 10px; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, sans-serif; }
+code { background: #222734; padding: 0 4px; border-radius: 4px; }
+.muted { color: var(--muted); font-weight: normal; }
+.bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.badge { padding: 2px 10px; border-radius: 999px; background: var(--line); text-transform: uppercase; font-size: 11px; letter-spacing: .05em; }
+.badge.running { background: var(--accent); color: #fff; }
+.badge.paused { background: var(--warn); color: #111; }
+.badge.done { background: var(--ok); color: #111; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+summary { cursor: pointer; font-weight: 600; }
+details > *:not(summary) { margin-top: 8px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+button { background: #232838; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; cursor: pointer; font: inherit; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--err); }
+button.link { background: none; border: 0; color: var(--muted); padding: 0 4px; font-size: 12px; }
+input, select, textarea { background: #0d0f14; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; }
+textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+.progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+#progressFill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+#progressText { margin-top: 6px; }
+.reason { margin-top: 6px; color: var(--warn); }
+.inline select { margin-left: 6px; max-width: 220px; }
+.drop { display: block; border: 1px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center; color: var(--muted); cursor: pointer; }
+.drop.over { border-color: var(--accent); color: var(--text); }
+.drop input { display: none; }
+.sheet { display: grid; grid-template-columns: 48px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sheet img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; background: #000; }
+.sheet input { width: 100%; margin-bottom: 3px; }
+.sheet .uses { font-size: 11px; color: var(--muted); }
+.page { border-top: 1px solid var(--line); padding: 6px 0; }
+.page.current { background: #1c2233; border-radius: 6px; padding: 6px; }
+.page .head { display: flex; gap: 6px; align-items: center; }
+.page .num { font-weight: 700; min-width: 26px; }
+.page .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page select { font-size: 11px; padding: 2px 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--reuse); }
+.chip.attach { background: #1f5f45; color: #c7f5df; }
+.chip.missing { background: #5b2020; color: #ffd0d0; }
+.chip.newchat { background: #2b3a78; }
+.status { font-size: 11px; }
+.status.done { color: var(--ok); } .status.failed { color: var(--err); } .status.skipped { color: var(--muted); }
+.page pre { white-space: pre-wrap; font-size: 11px; background: #0d0f14; padding: 6px; border-radius: 6px; max-height: 220px; overflow: auto; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.grid label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 12px; }
+.grid label.wide { grid-column: 1 / -1; }
+.grid label.check { flex-direction: row; align-items: center; gap: 6px; grid-column: 1 / -1; color: var(--text); }
+#log { font-family: ui-monospace, monospace; font-size: 11px; max-height: 260px; overflow: auto; }
+#log div { padding: 1px 0; }
+#log .warn { color: var(--warn); } #log .error { color: var(--err); } #log .ok { color: var(--ok); }

@@ -1,0 +1,49 @@
+<!doctype html><html><head><title>Mock ChatGPT</title></head><body>
+<main id="thread"></main>
+<form id="composer">
+  <div id="attachments"></div>
+  <input type="file" accept="image/*" multiple id="upload" style="display:none">
+  <div id="prompt-textarea" contenteditable="true" style="min-height:40px;border:1px solid #999"></div>
+  <button type="button" data-testid="send-button" disabled>Send</button>
+</form>
+<script>
+  // Tiny fake of the ChatGPT composer for end-to-end tests.
+  window.__sent = [];
+  let pending = [];
+  let turn = 0;
+  const ed = document.getElementById('prompt-textarea');
+  const send = document.querySelector('[data-testid="send-button"]');
+  const form = document.getElementById('composer');
+  const refresh = () => { send.disabled = !ed.innerText.trim() || form.querySelector('[role=progressbar]'); };
+  ed.addEventListener('input', refresh);
+  document.getElementById('upload').addEventListener('change', e => {
+    const files = [...e.target.files];
+    const spin = document.createElement('div'); spin.setAttribute('role','progressbar'); form.appendChild(spin); refresh();
+    setTimeout(() => { spin.remove(); pending.push(...files.map(f => f.name)); document.getElementById('attachments').textContent = pending.join(','); refresh(); }, 800);
+  });
+  function addTurn(role, html) {
+    const a = document.createElement('article'); a.dataset.testid = 'conversation-turn-' + (++turn);
+    a.innerHTML = `<div data-message-author-role="${role}">${html}</div>`;
+    document.getElementById('thread').appendChild(a); return a;
+  }
+  function image() {
+    const c = document.createElement('canvas'); c.width = 600; c.height = 1000;
+    const g = c.getContext('2d'); g.fillStyle = '#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0'); g.fillRect(0,0,600,1000);
+    return c.toDataURL('image/png');
+  }
+  send.addEventListener('click', () => {
+    const text = ed.innerText;
+    window.__sent.push({ text, files: pending.slice() });
+    pending = []; document.getElementById('attachments').textContent = '';
+    ed.innerHTML = ''; refresh();
+    addTurn('user', text.replace(/</g,'&lt;'));
+    const stop = document.createElement('button'); stop.type='button'; stop.dataset.testid = 'stop-button'; stop.textContent='Stop'; form.appendChild(stop);
+    const reply = addTurn('assistant', 'Creating image');
+    const noImage = /NOIMAGE/.test(text) && !window.__nudged;
+    setTimeout(() => {
+      stop.remove();
+      if (noImage) { window.__nudged = true; reply.firstChild.textContent = 'Would you like me to adjust anything first?'; return; }
+      reply.firstChild.innerHTML = `<p>Image created</p><img width="300" height="500" src="${image()}">`;
+    }, 2500);
+  });
+</script></body></html>

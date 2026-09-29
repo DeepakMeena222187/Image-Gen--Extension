@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Manhwa Autopilot for ChatGPT",
+  "version": "1.0.0",
+  "description": "Queues manhwa page prompts into ChatGPT, attaches character sheets only when needed, and saves each generated image.",
+  "permissions": ["storage", "unlimitedStorage", "sidePanel", "downloads", "tabs"],
+  "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*", "https://*.oaiusercontent.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Manhwa Autopilot" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["lib/core.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

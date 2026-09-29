@@ -39,7 +39,17 @@ Open "message that will be sent" under any page to see exactly what will be type
 2. **Text copied off that page** (for example "COPY THIS WHOLE PART"). Pages are split on the `IMG10 — Title` lines. The page's button labels (`COPY PAGE`, `+VO`, `COPY THIS WHOLE PART`) are dropped. Layout tags (`L3 three stacked`, `LOAD-BEARING`) stay with the page they belong to. `PART …` lines start a new part and never leak into the previous page.
 3. **`=== … ===` headers**, one per page, as below.
 
-Every message starts with *"Generate exactly ONE image: page NN only…"*. If a page still looks like several pages stuck together (more than one `Attach:` line), the plan shows a ⚠ and Start asks before sending it.
+### Two ways of sending (Settings → "How pages are sent")
+
+- **Block (default).** For each PART:
+  1. The whole part goes to ChatGPT in one message with every sheet it needs. The message says: *"Read every card now, but do NOT generate any image… reply Ready"*. A Negative line repeated on every card is stated once at the top.
+  2. Then, one page at a time: *"Now create IMG20 — And One In The Mouth. Exactly ONE image for this page only…"*. It waits for the image, saves it, then asks for IMG21, and so on.
+  3. Each "create" message repeats that page's exact `Window text` line so the numbers survive. It re-attaches a sheet only when it has gone stale.
+
+  Set "Max pages per block" (e.g. 5) to split long parts like PART SEVEN (10 pages).
+- **Page.** Each page's full card is sent as its own message.
+
+In page mode, every message starts with *"Generate exactly ONE image: page NN only…"*. If a page still looks like several pages stuck together (more than one `Attach:` line), the plan shows a ⚠ and Start asks before sending it.
 
 The **episode brief** is sent once at the start of each chat, before the first page, as a separate message that tells ChatGPT not to draw anything. You can edit the brief in the Script section.
 

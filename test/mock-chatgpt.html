@@ -48,7 +48,7 @@
     ed.innerHTML = ''; refresh();
     addTurn('user', text.replace(/</g,'&lt;'));
     const reply = addTurn('assistant', '');
-    if (/^EPISODE BRIEF/.test(text)) return withStop(1500, () => { reply.firstChild.textContent = 'Ready'; });
+    if (/^(EPISODE BRIEF|BLOCK:)/.test(text)) return withStop(1500, () => { reply.firstChild.textContent = 'Ready'; });
     if (/SLOWREAD/.test(text)) return withStop(1000, () => setTimeout(() => showImage(reply), 20000));
     if (/ERRORONCE/.test(text) && !window.__errored) {
       window.__errored = true;

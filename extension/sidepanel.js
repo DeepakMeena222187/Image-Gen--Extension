@@ -122,6 +122,10 @@ function renderPlan() {
       if (d) {
         if (d.newChatBefore) chips += '<span class="chip newchat">new chat</span>';
         if (d.sendBrief) chips += '<span class="chip newchat">brief first</span>';
+        if (d.block) {
+          const nums = d.block.idx.map(k => pages[k].num);
+          chips += `<span class="chip newchat" title="Sent before this page, no image">block ${nums[0]}–${nums[nums.length - 1]} first${d.block.attach.length ? ` · 📎 ${esc(d.block.attach.map(a => a.charName).join(', '))}` : ''}</span>`;
+        }
         chips += d.attach.map(a => `<span class="chip attach">📎 ${esc(a.charName)}${a.fuzzy ? ` ⚠→${esc(a.name)}` : ''}</span>`).join('');
         chips += d.reuse.map(a => `<span class="chip">${esc(a.charName)}${a.fuzzy ? ` ⚠→${esc(a.name)}` : ''}</span>`).join('');
         chips += d.missing.map(m => `<span class="chip missing">${esc(m.name)}: no sheet</span>`).join('');
@@ -132,7 +136,8 @@ function renderPlan() {
       }
       const status = r ? `<span class="status ${r.status}" title="${esc(r.error || r.file || '')}">${r.status}</span>` : '';
       let msg = d ? MA.buildMessage(p, d, S.settings) : p.body;
-      if (d?.sendBrief) msg = `[sent first, as its own message]\n${MA.briefMessage(S.project.brief)}\n\n[then this page]\n${msg}`;
+      if (d?.block) msg = `[block message, sent first, no image]\n${MA.blockMessage(pages, d, S.settings)}\n\n[then this page]\n${msg}`;
+      if (d?.sendBrief) msg = `[episode brief, sent first of all]\n${MA.briefMessage(S.project.brief)}\n\n${msg}`;
       const tags = (p.tags || []).map(t => `<span class="chip">${esc(t)}</span>`).join('');
       const warn = (p.warnings || []).map(w => `<div class="reason">⚠ ${esc(w)}</div>`).join('');
       return `<div class="page ${active && i === S.progress.index ? 'current' : ''}">
@@ -260,7 +265,10 @@ async function command(kind) {
     const from = +($('startAt').value || 0);
     const pending = S.project.pages.slice(from);
     const missing = new Set();
-    MA.planAll(S.project.pages, S.sheets, S.settings, S.project.overrides, from).forEach(d => d?.missing.forEach(m => missing.add(m.name)));
+    MA.planAll(S.project.pages, S.sheets, S.settings, S.project.overrides, from).forEach(d => {
+      d?.missing.forEach(m => missing.add(m.name));
+      d?.block?.missing.forEach(m => missing.add(m.name));
+    });
     if (missing.size && !confirm(`No sheet uploaded for: ${[...missing].join(', ')}.\nThose pages will be sent with only the text description. Continue?`)) return;
     const merged = pending.filter(p => p.warnings?.some(w => /merged/.test(w)));
     if (merged.length && !confirm(`${merged.length} page(s) look like several pages stuck together (page ${merged.map(p => p.num).join(', ')}). ChatGPT would draw several images for them. Start anyway?`)) return;

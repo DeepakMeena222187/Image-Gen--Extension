@@ -63,6 +63,13 @@
   <details class="card">
     <summary>Settings</summary>
     <form id="settings" class="grid">
+      <label class="wide">How pages are sent
+        <select name="sendMode">
+          <option value="block">Block: send the whole PART first, then "Now create IMGnn" one by one</option>
+          <option value="page">Page: send each page's full card as its own message</option>
+        </select>
+      </label>
+      <label>Max pages per block (0 = one PART) <input name="blockSize" type="number" min="0" max="20" /></label>
       <label>Attach mode
         <select name="attachMode">
           <option value="smart">Smart (re-attach when memory may fade)</option>

@@ -5,6 +5,9 @@
   'use strict';
 
   const DEFAULT_SETTINGS = {
+    sendMode: 'block',          // 'block': send a whole PART first, then "Now create IMGnn" per page
+                                // 'page':  send each page's full card as its own message
+    blockSize: 0,               // 0 = one block per PART; otherwise at most this many pages per block
     attachMode: 'smart',        // 'smart' | 'always' | 'never'
     refreshEvery: 5,            // re-attach a character's sheet after this many generations in the same chat
     delayMin: 5,                // seconds to wait after an image finishes, before the next prompt
@@ -264,12 +267,46 @@
   }
 
   function freshCtx() {
-    return { genInChat: 0, lastAttached: {}, briefSent: false, lastPart: null };
+    return { genInChat: 0, lastAttached: {}, briefSent: false, lastPart: null, lastBlock: null };
+  }
+
+  // Block mode groups pages: one block per PART, cut every settings.blockSize
+  // pages when that is set (or every 5 pages when the script has no parts).
+  function makeBlocks(pages, settings) {
+    const size = Math.max(0, Number({ ...DEFAULT_SETTINGS, ...settings }.blockSize) || 0);
+    const blocks = [];
+    let cur = null;
+    pages.forEach((p, i) => {
+      const part = p.part?.title || '';
+      const limit = size > 0 ? size : part ? Infinity : 5;
+      if (!cur || part !== cur.part || cur.idx.length >= limit) {
+        cur = { part, idx: [] };
+        blocks.push(cur);
+      }
+      cur.idx.push(i);
+    });
+    const byPage = {};
+    for (const b of blocks) {
+      b.key = `p${b.idx[0]}-${b.idx[b.idx.length - 1]}`;
+      for (const i of b.idx) byPage[i] = b;
+    }
+    return { blocks, byPage };
+  }
+
+  // Should this sheet go with the next message? (mutates nothing)
+  function wantsAttach(sheetId, c, settings, override, refresh) {
+    if (override === 'force') return true;
+    if (override === 'none') return false;
+    if (settings.attachMode === 'always') return true;
+    if (settings.attachMode === 'never') return false;
+    const last = c.lastAttached[sheetId];
+    return last === undefined || c.genInChat - last >= refresh;
   }
 
   // Decide what to do for one page given the current chat context.
   // override: 'auto' | 'force' | 'none' | 'skip'
   // opts.hasBrief: an episode brief exists and may need sending first.
+  // opts.pages / opts.blocks / opts.overrides: needed for block mode.
   function planPage(page, ctx, sheets, settings, override = 'auto', opts = {}) {
     settings = { ...DEFAULT_SETTINGS, ...settings };
     const decision = {
@@ -277,6 +314,7 @@
       newChatBefore: false,
       sendBrief: false,
       sceneNote: false,
+      block: null,  // { key, idx, attach, reuse, described, missing } when a block message goes first
       attach: [],   // [{ sheetId, name, fuzzy }]
       reuse: [],    // [{ sheetId, name }]  already in chat memory
       missing: [],  // [{ name }]           no sheet uploaded for this character
@@ -286,35 +324,43 @@
 
     const every = Number(settings.newChatEvery) || 0;
     if (every > 0 && ctx.genInChat >= every) decision.newChatBefore = true;
-    const c = decision.newChatBefore ? freshCtx() : { ...freshCtx(), ...ctx };
+    const base = decision.newChatBefore ? freshCtx() : { ...freshCtx(), ...ctx };
+    const c = { ...base, lastAttached: { ...base.lastAttached } };
     decision.sendBrief = !!(settings.sendBrief && opts.hasBrief && !c.briefSent);
     decision.sceneNote = !!(settings.sceneContext && page.part?.beat && c.lastPart !== page.part.title);
     const refresh = Math.max(1, Number(settings.refreshEvery) || 1);
-
-    const seen = new Set();
-    for (const ch of page.characters) {
-      const hit = matchSheet(ch, sheets);
-      if (!hit) {
-        // "THE STILL — LOCKED. An enormous pale…" carries its own description in the prompt.
-        const described = ch.locked && ch.raw.length > ch.name.length + 40;
-        (described ? decision.described : decision.missing).push({ name: ch.name });
-        continue;
-      }
-      if (seen.has(hit.sheet.id)) continue;
-      seen.add(hit.sheet.id);
-      const last = c.lastAttached[hit.sheet.id];
-      let attach;
-      if (override === 'force') attach = true;
-      else if (override === 'none') attach = false;
-      else if (settings.attachMode === 'always') attach = true;
-      else if (settings.attachMode === 'never') attach = false;
-      else attach = last === undefined || c.genInChat - last >= refresh;
-
-      const entry = { sheetId: hit.sheet.id, name: hit.sheet.name, charName: ch.name, fuzzy: hit.fuzzy };
-      (attach ? decision.attach : decision.reuse).push(entry);
-    }
     const cap = Math.max(1, Number(settings.maxFilesPerMessage) || 10);
-    if (decision.attach.length > cap) decision.reuse.push(...decision.attach.splice(cap));
+
+    const sort = (chars, into, ov, seen) => {
+      for (const ch of chars) {
+        const hit = matchSheet(ch, sheets);
+        if (!hit) {
+          // "THE STILL — LOCKED. An enormous pale…" carries its own description in the prompt.
+          const described = ch.locked && ch.raw.length > ch.name.length + 40;
+          const list = described ? into.described : into.missing;
+          if (!list.some(m => m.name === ch.name)) list.push({ name: ch.name });
+          continue;
+        }
+        if (seen.has(hit.sheet.id)) continue;
+        seen.add(hit.sheet.id);
+        const entry = { sheetId: hit.sheet.id, name: hit.sheet.name, charName: ch.name, fuzzy: hit.fuzzy };
+        (wantsAttach(hit.sheet.id, c, settings, ov, refresh) ? into.attach : into.reuse).push(entry);
+      }
+      if (into.attach.length > cap) into.reuse.push(...into.attach.splice(cap));
+    };
+
+    // Block mode: the first page we reach in a block sends the whole block first,
+    // with every sheet the block needs that ChatGPT doesn't already have.
+    const block = settings.sendMode === 'block' && opts.blocks ? opts.blocks.byPage[page.index] : null;
+    if (block && c.lastBlock !== block.key && opts.pages) {
+      const ov = opts.overrides || {};
+      const idx = block.idx.filter(i => i >= page.index && ov[i] !== 'skip');
+      decision.block = { key: block.key, idx, attach: [], reuse: [], missing: [], described: [] };
+      sort(idx.flatMap(i => opts.pages[i].characters), decision.block, 'auto', new Set());
+      for (const a of decision.block.attach) c.lastAttached[a.sheetId] = c.genInChat;
+    }
+
+    sort(page.characters, decision, override, new Set());
     return decision;
   }
 
@@ -323,6 +369,10 @@
     if (decision.skip) return ctx;
     const base = decision.newChatBefore ? freshCtx() : { ...freshCtx(), ...ctx };
     const next = { ...base, lastAttached: { ...base.lastAttached } };
+    if (decision.block) {
+      for (const a of decision.block.attach) next.lastAttached[a.sheetId] = next.genInChat;
+      next.lastBlock = decision.block.key;
+    }
     for (const a of decision.attach) next.lastAttached[a.sheetId] = next.genInChat;
     if (decision.sendBrief) next.briefSent = true;
     if (page?.part) next.lastPart = page.part.title;
@@ -330,12 +380,18 @@
     return next;
   }
 
+  // Everything planPage needs besides the page itself.
+  function planOpts(pages, settings, overrides = {}, hasBrief = false) {
+    return { hasBrief, pages, overrides, blocks: makeBlocks(pages, settings) };
+  }
+
   // Simulate a whole run (for the preview table).
   function planAll(pages, sheets, settings, overrides = {}, startIndex = 0, startCtx = freshCtx(), opts = {}) {
     let ctx = startCtx;
+    const o = { ...planOpts(pages, settings, overrides), ...opts };
     return pages.map((p, i) => {
       if (i < startIndex) return null;
-      const d = planPage(p, ctx, sheets, settings, overrides[i] || 'auto', opts);
+      const d = planPage(p, ctx, sheets, settings, overrides[i] || 'auto', o);
       ctx = commit(ctx, d, p);
       return d;
     });
@@ -349,16 +405,76 @@
     );
   }
 
+  const nn = n => String(n).padStart(2, '0');
+  const names = list => list.map(a => a.charName || a.name).join(', ');
+
+  // "IMG20 — And One In The Mouth", however the page title was written.
+  function pageLabel(page) {
+    const m = page.title.match(/IMG\s*\d+(?:\s*[—–:-]\s*[^(=]+)?/i);
+    return tidy(m ? m[0] : `IMG${nn(page.num)} — ${page.title}`).replace(/\s*[—–:-]\s*$/, '');
+  }
+
+  function cardLines(page, settings) {
+    let lines = page.body.split('\n').filter(l => !JUNK_LINE_RE.test(l));
+    if (settings.stripVO) lines = lines.filter(l => !VO_LINE_RE.test(l));
+    return lines;
+  }
+
+  // Block mode, step 1: every card of the block in one message, no image yet.
+  function blockMessage(pages, decision, settings) {
+    settings = { ...DEFAULT_SETTINGS, ...settings };
+    const b = decision.block;
+    const ps = b.idx.map(i => pages[i]);
+    const cards = ps.map(p => cardLines(p, settings));
+    // Long lines that repeat on every card (the Negative block) are stated once.
+    const shared =
+      cards.length > 1
+        ? [...new Set(cards[0].filter(l => l.trim().length > 80 && !ATTACH_LINE_RE.test(l) && cards.every(c => c.includes(l))))]
+        : [];
+    const body = cards.map(c => c.filter(l => !shared.includes(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim());
+    const first = ps[0];
+    const last = ps[ps.length - 1];
+    const range = ps.length > 1 ? `IMG${nn(first.num)} to IMG${nn(last.num)}` : `IMG${nn(first.num)}`;
+    const part = first.part;
+
+    const out = [
+      `BLOCK: ${ps.length} page card${ps.length > 1 ? 's' : ''}, ${range}${part ? ` (${part.title})` : ''}.`,
+      'Read every card now, but do NOT generate any image for this message.',
+      'After this I will ask for the pages one at a time, in order. Each time, draw exactly ONE image: only the page I name, following its card exactly.',
+    ];
+    if (b.attach.length) out.push(`Reference sheets attached with this message: ${names(b.attach)}. Match every character to its sheet.`);
+    if (b.reuse.length) out.push(`Reference sheets already in this chat (keep using them exactly): ${names(b.reuse)}.`);
+    if (b.described.length) out.push(`Described in words on the cards (no sheet): ${names(b.described)}.`);
+    out.push('Reply only "Ready".');
+    if (settings.sceneContext && part?.beat) out.push('', `Scene: ${part.beat}`);
+    if (shared.length) out.push('', 'Rules for EVERY page in this block:', ...shared);
+    out.push('', body.join('\n\n---\n\n'));
+    return out.join('\n');
+  }
+
+  // Block mode, step 2: the short "now draw this one" message.
+  function pageCommand(page, decision) {
+    const label = pageLabel(page);
+    const out = [
+      `Now create ${label}. Exactly ONE image for this page only, following the IMG${nn(page.num)} card in the block above exactly: layout, prompt, SFX, face, balloons, window text and negative. Do not draw any other page.`,
+    ];
+    const win = page.body.split('\n').filter(l => /^\s*window text\b/i.test(l));
+    if (win.length) out.push(...win.map(l => l.trim()));
+    if (decision.attach.length) {
+      out.push(`(Reference sheet${decision.attach.length > 1 ? 's' : ''} attached again with this message: ${names(decision.attach)}. Use exactly.)`);
+    }
+    return out.join('\n');
+  }
+
   // Build the text sent to ChatGPT for a page.
   function buildMessage(page, decision, settings) {
     settings = { ...DEFAULT_SETTINGS, ...settings };
-    let lines = page.body.split('\n').filter(l => !JUNK_LINE_RE.test(l));
-    if (settings.stripVO) lines = lines.filter(l => !VO_LINE_RE.test(l));
-    let text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (settings.sendMode === 'block') return pageCommand(page, decision);
+    let text = cardLines(page, settings).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
     if (settings.annotateReuse && decision.reuse.length) {
-      const reused = decision.reuse.map(r => r.charName || r.name).join(', ');
-      const now = decision.attach.map(a => a.charName || a.name).join(', ');
+      const reused = names(decision.reuse);
+      const now = names(decision.attach);
       const note =
         `(Reference sheets for ${reused} were attached earlier in this chat — keep using them exactly.` +
         (now ? ` Attached with this message: ${now}.)` : ')');
@@ -373,7 +489,7 @@
 
     const top = [];
     if (settings.oneImageGuard) {
-      top.push(`Generate exactly ONE image: page ${String(page.num).padStart(2, '0')} only, as described below. Do not draw any other page.`);
+      top.push(`Generate exactly ONE image: page ${nn(page.num)} only, as described below. Do not draw any other page.`);
     }
     if (decision.sceneNote && page.part) top.push(`Scene context: ${page.part.title} — ${page.part.beat}`);
     return top.length ? `${top.join('\n')}\n\n${text}` : text;
@@ -388,10 +504,15 @@
     htmlToProject,
     matchSheet,
     freshCtx,
+    makeBlocks,
+    planOpts,
     planPage,
     commit,
     planAll,
     briefMessage,
+    blockMessage,
+    pageCommand,
+    pageLabel,
     buildMessage,
   };
   root.MA = api;

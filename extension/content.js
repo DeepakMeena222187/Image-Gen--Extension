@@ -332,7 +332,10 @@
 
     // Re-derive the decision unless we already sent this page (resume after reload).
     let decision = progress.pending?.index === i ? progress.pending.decision : null;
-    if (!decision) decision = MA.planPage(page, progress.ctx, sheets, settings, override, { hasBrief: !!project.brief?.trim() });
+    if (!decision) {
+      const opts = MA.planOpts(project.pages, settings, project.overrides || {}, !!project.brief?.trim());
+      decision = MA.planPage(page, progress.ctx, sheets, settings, override, opts);
+    }
 
     if (decision.skip) {
       results[i] = { status: 'skipped', at: now() };
@@ -364,11 +367,34 @@
       }
 
       const byId = Object.fromEntries(sheets.map(s => [s.id, s]));
-      const files = [];
-      for (const a of decision.attach) {
-        const s = byId[a.sheetId];
-        if (s) files.push(await dataUrlToFile(s.dataUrl, s.fileName || `${MA.slug(s.name)}.png`, s.mime));
+      const filesFor = async list => {
+        const out = [];
+        for (const a of list) {
+          const s = byId[a.sheetId];
+          if (s) out.push(await dataUrlToFile(s.dataUrl, s.fileName || `${MA.slug(s.name)}.png`, s.mime));
+        }
+        return out;
+      };
+
+      if (decision.block) {
+        const b = decision.block;
+        const nums = b.idx.map(k => project.pages[k].num);
+        await log(`Sending block IMG${nums[0]}–IMG${nums[nums.length - 1]} (${nums.length} cards, no image yet), attaching [${b.attach.map(a => a.name).join(', ') || 'none'}]`);
+        await attachFiles(await filesFor(b.attach));
+        await sendText(MA.blockMessage(project.pages, decision, settings));
+        const r = await waitForResult({ ...settings, genTimeout: 420 }, false);
+        if (r.kind === 'limit') throw new Error('ChatGPT usage limit reached. Paused. Resume when your limit resets.');
+        if (r.kind === 'error' || r.kind === 'timeout') throw new Error(`The block message did not get a reply (${r.kind}).`);
+        if (r.kind === 'image') await log('ChatGPT drew an image for the block message anyway. Ignoring it and asking page by page.', 'warn');
+        const lastAttached = { ...progress.ctx.lastAttached };
+        for (const a of b.attach) lastAttached[a.sheetId] = progress.ctx.genInChat;
+        progress.ctx = { ...MA.freshCtx(), ...progress.ctx, lastAttached, lastBlock: b.key };
+        decision = { ...decision, block: null };
+        await patchProgress({ ctx: progress.ctx, pending: { index: i, decision } });
+        await sleep(3000);
       }
+
+      const files = await filesFor(decision.attach);
       const names = decision.attach.map(a => a.name).join(', ') || 'none';
       const reused = decision.reuse.map(a => a.name).join(', ');
       await log(`Page ${page.num}: attaching [${names}]${reused ? `, reusing from chat [${reused}]` : ''}${decision.missing.length ? `, no sheet for [${decision.missing.map(m => m.name).join(', ')}]` : ''}`);
